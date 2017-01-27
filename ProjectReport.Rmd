@@ -1,0 +1,147 @@
+---
+title: "Practical Machine Learning - Final Project"
+author: "Chockalingam Sivakumar"
+date: "27 January 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+This is a brief report of the various machine learning models trained for a multiclass classification problem, submitted for the requirement of the course final project (Practical Machine Learning - Coursera).
+
+## Background
+(Text taken from the course project description page)  
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv  
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv  
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+## 1. Data processing
+The initial training data consisted of 160 features of more than 19000 instances, with some of the columns consisting of identification data and timestamps. Out of the measurement features, more than 90 features consisted of lot of missing data and very few measurements in it. These columns were removed in both the training and test data, resulting in only 52 features and 1 outcome (classe). 
+
+```{r}
+# Loading the required libraries
+suppressMessages(library(dplyr))
+suppressMessages(library(caret))
+suppressMessages(library(rpart.plot))
+suppressMessages(library(rpart))
+suppressMessages(library(rattle))
+suppressMessages(library(randomForest))
+
+# Read the csv files into R
+file1 <- "./pml-training.csv"
+file2 <- "./pml-testing.csv"
+pmltrain <- read.csv(file1, header = TRUE)
+pmltest <- read.csv(file2, header = TRUE)
+
+# Subset the variables used to train the model
+pmltr.sub <- select(pmltrain,8:160)
+pmlte.sub <- select(pmltest,8:160)
+```
+
+The below R code outputs the number of columns in the data with no missing data in them. Inspection of the remaining columns showed that there were too many missing values (> 19000) in each of those columns. These columns were removed from the training and testing set.  
+
+```{r}
+sum(apply(pmlte.sub, 2, function(x) sum(is.na(x))) == 0)
+
+# Removing features that have NAs (every feature where NA is present > 19000 NAs) 
+pmltr.sub <- pmltr.sub[apply(pmlte.sub, 2, function(x) sum(is.na(x))) == 0]
+pmlte.sub <- pmlte.sub[apply(pmlte.sub, 2, function(x) sum(is.na(x))) == 0]
+
+# Dimensions of the training and test sets
+dim(pmltr.sub)
+dim(pmlte.sub)
+```
+
+Above, we see the dimension of the training set and the final-test set. The final column in the training set is the outcome (classe) and the final column in the final-test set consists of user id. It is also useful to check if any of the features used for modeling consists of near zero variance in them.  
+
+```{r}
+# Checking if there is any feature(s) with near zero variance
+nzv <- nearZeroVar(pmltr.sub, saveMetrics = TRUE)
+sum(nzv$nzv == TRUE)
+```
+
+## 2. Data Partition
+The training data (pmltr.sub) consists of 19622 observations. We split this dataset into a training set (p = 0.65) and a testing set (p = 0.35).  
+
+```{r}
+# Data partition
+intrain <- createDataPartition(y = pmltr.sub$classe, p = 0.65, list = FALSE)
+training <- pmltr.sub[intrain,]
+testing <- pmltr.sub[-intrain,]
+```
+
+## 3. Modeling and Prediction
+### Classification tree with `rpart()`
+
+We use the `rpart()` function from rpart package to train a multiclass classification machine learning model. 
+
+```{r}
+# Training with classification tree
+modfit.rpart <- rpart(classe ~ ., data=training, method="class")
+```
+
+The trained model is used on the testing set to predict the outcome. The predicted outcome is then compared with the actual outcome to compute the out-of-sample accuracy of the model. 
+```{r}
+# Predict the testing set with the trained model 
+predictions1 <- predict(modfit.rpart, testing, type = "class")
+
+# Accuracy and other metrics
+confusionMatrix(predictions1, testing$classe)
+modfit.rpart$finalModel
+```
+
+As we see, the classification tree model has not performed well with the given data. The overall accuracy is about 0.7145. 
+
+### Random forest model
+We use the `randomForest()` function from the randomForest package, which is very fast compared to training with `train()` function in the caret package.  
+```{r}
+# Training with Random forest model
+modfit.rf <- randomForest(classe ~. , data=training)
+
+# Predict the testing set with the trained model
+predictions2 <- predict(modfit.rf, testing, type = "class")
+
+# Accuracy and other metrics
+confusionMatrix(predictions2, testing$classe)
+modfit.rf$finalModel
+```
+
+The random forest model has performed very well with an accuracy of 0.9937. This is very good model and is ready for performing prediction on the final test dataset. Let us use the above model to predict the outcome for the final test dataset. The outcome is printed below. 
+
+```{r}
+# Predict the outcome for actual test case
+pred.final <- predict(modfit.rf, pmlte.sub)
+pred.final
+```
+
+## Conclusion
+We trained multiclass classification models using `rpart()` and `randomForest()`. The random forest model performed very well with an accuracy of 0.9937 and an out-of-sample error of 0.0063. 
+
+## A1. Appendix
+
+### Script for generating submission files
+The course project prediction quiz requires the predicted outcomes to be submitted as individual files in a prescribed format. The below script performs this task.
+
+```{r}
+submit.script = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+submit.script(pred.final)
+```
